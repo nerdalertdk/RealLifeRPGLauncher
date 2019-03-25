@@ -24,24 +24,25 @@ angular.module('App').controller('modCtrl', ['$scope', '$rootScope', ($scope, $r
         $('#modScroll').perfectScrollbar()
         break
       case 'update-dl-progress-server':
+        console.log(args.state)
         $scope.update({
-          state: 'Server - Verbunden',
-          hint: 'Download via Server läuft',
+          state: `Server - Verbunden`,
+          hint: `Download läuft über (${args.state.threads} Threads)`,
           downloading: true,
           canCancel: true,
           downSpeed: prettyBytes(args.state.speed),
           upSpeed: 0,
-          totalProgress: helpers.toFileProgress(args.state.totalSize, args.state.totalDownloaded + args.state.size.transferred),
+          totalProgress: helpers.toFileProgress(args.state.totalSize, args.state.totalDownloaded),
           totalSize: prettyBytes(args.state.totalSize),
-          totalDownloaded: prettyBytes(args.state.totalDownloaded + args.state.size.transferred),
-          totalETA: humanizeDuration(Math.round(((args.state.totalSize - (args.state.totalDownloaded + args.state.size.transferred)) / args.state.speed) * 1000), {
+          totalDownloaded: prettyBytes(args.state.totalDownloaded),
+          totalETA: humanizeDuration(Math.round(((args.state.totalSize - (args.state.totalDownloaded)) / args.state.speed) * 1000), {
             language: 'de',
             round: true
           }),
           totalPeers: 0,
           maxConns: 0,
-          fileName: helpers.cutName(args.state.fileName),
-          fileProgress: helpers.toProgress(args.state.percent)
+          fileName: args.state.finished + '/' + args.state.count,
+          fileProgress: helpers.toFileProgress(args.state.count, args.state.finished)
         })
         $scope.pushToChart(new Date().getTime(), args.state.speed)
         $scope.$apply()
@@ -67,6 +68,7 @@ angular.module('App').controller('modCtrl', ['$scope', '$rootScope', ($scope, $r
         $scope.$apply()
         break
       case 'update-dl-progress-torrent':
+        console.log(args)
         $scope.update({
           state: 'Torrent - Verbunden',
           hint: 'Download via Torrent läuft',
@@ -86,7 +88,7 @@ angular.module('App').controller('modCtrl', ['$scope', '$rootScope', ($scope, $r
         $scope.pushToChart(new Date().getTime(), args.state.torrentDownloadSpeedState, args.state.torrentUploadSpeedState)
         $scope.$apply()
         break
-      case 'update-chickcheck-progress':
+      case 'update-quickcheck-progress':
         $scope.update({
           state: 'Versionsunterschiede werden bestimmt...',
           hint: 'Prüfe Dateien',
@@ -200,7 +202,7 @@ angular.module('App').controller('modCtrl', ['$scope', '$rootScope', ($scope, $r
           if (size > 100000000) {
             if (args.mod.Torrent !== '' && args.mod.Torrent !== null) {
               alertify.set({labels: {ok: 'Torrent', cancel: 'Server'}})
-              alertify.confirm(args.list.length + ' Dateien müssen heruntergelanden werden (' + prettyBytes(size) + ')', (e) => {
+              alertify.confirm(args.list.length + ' Dateien müssen heruntergeladen werden (' + prettyBytes(size) + ')', (e) => {
                 if (e) {
                   $scope.reset()
                   $scope.initListDownload(args.list, true, args.mod)
@@ -215,7 +217,7 @@ angular.module('App').controller('modCtrl', ['$scope', '$rootScope', ($scope, $r
           } else {
             $scope.initListDownload(args.list, false, args.mod)
           }
-          helpers.spawnNotification(args.list.length + ' Dateien müssen heruntergelanden werden (' + prettyBytes(size) + ')')
+          helpers.spawnNotification(args.list.length + ' Dateien müssen heruntergeladen werden (' + prettyBytes(size) + ')')
           $scope.$apply()
         } else {
           helpers.spawnNotification('Überprüfung abgeschlossen - Mod ist aktuell.')
@@ -241,15 +243,50 @@ angular.module('App').controller('modCtrl', ['$scope', '$rootScope', ($scope, $r
         })
         break
       case 'update-dl-progress-done':
-        $scope.state = 'Abgeschlossen'
-        $scope.progress = 100
+        $scope.update({
+          state: 'Abgeschlossen',
+          hint: 'Download abgeschlossen',
+          downloading: false,
+          canCancel: false,
+          downSpeed: 0,
+          upSpeed: 0,
+          totalProgress: '',
+          totalSize: 0,
+          totalDownloaded: 0,
+          totalETA: '',
+          totalPeers: 0,
+          maxConns: 0,
+          fileName: '',
+          fileProgress: ''
+        })
         helpers.spawnNotification('Download abgeschlossen.')
-        $scope.reset()
-        $scope.checkUpdates()
+        $rootScope.refresh(false)
+        break
+      case 'update-dl-progress-error':
+        $scope.update({
+          state: 'Fehler',
+          hint: args.err_msg,
+          downloading: false,
+          canCancel: false,
+          downSpeed: 0,
+          upSpeed: 0,
+          totalProgress: '',
+          totalSize: 0,
+          totalDownloaded: 0,
+          totalETA: '',
+          totalPeers: 0,
+          maxConns: 0,
+          fileName: '',
+          fileProgress: ''
+        })
+        helpers.spawnNotification('Download fehlgeschlagen.')
         break
       case 'cancelled':
         $scope.reset()
         $scope.checkUpdates()
+        break
+      case 'notify-dl':
+        alertify.log(args.err_msg, 'danger')
         break
       case 'notification-callback':
         if (args.data.Active) {
@@ -331,6 +368,15 @@ angular.module('App').controller('modCtrl', ['$scope', '$rootScope', ($scope, $r
     })
   }
 
+  $scope.initBisignCheck = (mod) => {
+    alertify.log('Bisign Dateien werden neu geladen...', 'primary')
+    ipcRenderer.send('to-dwn', {
+      type: 'start-bisign-check',
+      mod: mod,
+      path: $rootScope.ArmaPath
+    })
+  }
+
   $scope.initUpdate = (mod) => {
     alertify.log('Update wird gestartet', 'primary')
     ipcRenderer.send('to-dwn', {
@@ -342,7 +388,7 @@ angular.module('App').controller('modCtrl', ['$scope', '$rootScope', ($scope, $r
 
   $scope.initListDownload = (list, torrent, mod) => {
     $scope.update({
-      state: 'Download wird gestarted...',
+      state: 'Download wird gestartet...',
       hint: '',
       downloading: true,
       canCancel: true,
@@ -409,7 +455,7 @@ angular.module('App').controller('modCtrl', ['$scope', '$rootScope', ($scope, $r
           yAxes: [{
             ticks: {
               callback: (value) => {
-                return value + ' MB/s'
+                return ' ' + value + ' MB/s'
               },
               min: 0
             }
@@ -581,11 +627,11 @@ angular.module('App').controller('modCtrl', ['$scope', '$rootScope', ($scope, $r
           $rootScope.getMods()
         } else {
           $rootScope.slide = 5
-          alertify.log('Bitte wähle deine Arma Pfad aus', 'primary')
+          alertify.log('Bitte wähle deinen Arma Pfad aus', 'primary')
         }
       })
     } else {
-      alertify.log('Kein Arma Pfad gefunden', 'danger')
+      alertify.log('Keinen Arma Pfad gefunden', 'danger')
     }
   }
 

@@ -132,10 +132,33 @@ angular.module('App').controller('settingsCtrl', ['$scope', '$rootScope', ($scop
     if (dpath !== 'undefined' && dpath.includes('arma3') && dpath.includes('.exe')) {
       $rootScope.ArmaPath = dpath.substring(0, dpath.lastIndexOf('\\')) + '\\'
       $scope.saveSettings()
-      $rootScope.refresh()
+      $rootScope.refresh(false)
     } else {
       $rootScope.ArmaPath = ''
       $scope.saveSettings()
     }
+  }
+
+  $scope.uploadRPT = () => {
+    $rootScope.uploadingRPT = true
+    if ($rootScope.logged_in) {
+      ipcRenderer.send('to-web', {
+        type: 'upload_rpt',
+        pid: $rootScope.player_data.pid
+      })
+    } else {
+      ipcRenderer.send('to-web', {
+        type: 'upload_rpt',
+        pid: 0
+      })
+    }
+  }
+
+  $scope.openMPCache = () => {
+    shell.showItemInFolder(path.join(app.getPath('appData'), '..', 'Local', 'Arma 3', 'MPMissionsCache', 'x'))
+  }
+
+  $scope.startA3Verify = () => {
+    shell.openExternal('steam://validate/107410')
   }
 }])

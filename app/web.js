@@ -7,6 +7,18 @@ const {app} = require('electron').remote
 const ps = require('ps-node')
 const exec = require('child_process').exec
 const config = require('../config')
+const pathf = require('path')
+const os = require('os')
+
+let agent = `RealLifeRPG Launcher/${app.getVersion()} (${os.type()} ${os.release()}; ${os.platform()}; ${os.arch()}) - `
+
+if (typeof process.env.PORTABLE_EXECUTABLE_DIR !== 'undefined') {
+  agent = agent.concat('Portable')
+} else if (typeof process.windowsStore !== 'undefined') {
+  agent = agent.concat('Windows UWP')
+} else {
+  agent = agent.concat('Desktop')
+}
 
 ipcRenderer.on('to-web', (event, args) => {
   switch (args.type) {
@@ -19,11 +31,18 @@ ipcRenderer.on('to-web', (event, args) => {
     case 'ping-server-via-rdp' :
       pingServer(args.server)
       break
+    case 'upload_rpt' :
+      uploadRPT(getLatestRptFile(getArmaAppData()), args.pid)
+      break
   }
 })
 
 const getUrl = (args) => {
-  jsonist.get(args.url, (err, data, resp) => {
+  jsonist.get(args.url, {
+    headers: {
+      'user-agent': agent
+    }
+  }, (err, data, resp) => {
     getUrlCallback(args, err, data, resp)
   })
 }
@@ -39,7 +58,13 @@ const getUrlCallback = (args, err, data, resp) => {
 }
 
 const downloadFILE = (file) => {
-  progress(request(config.STATICFILESERVE + file), {}).on('progress', (state) => {
+  let options = {
+    url: config.STATICFILESERVE + file,
+    headers: {
+      'user-agent': agent
+    }
+  }
+  progress(request(options), {}).on('progress', (state) => {
     ipcRenderer.send('to-app', {
       type: 'update-dl-progress-file',
       state: state
@@ -72,5 +97,65 @@ const pingServer = (server) => {
         })
       }
     })
+  })
+}
+
+const getLatestRptFile = (dir) => {
+  let files = fs.readdirSync(dir).filter(function (v) {
+    return pathf.extname(v) === '.rpt'
+  }).map(function (v) {
+    return {
+      name: dir + v,
+      time: fs.statSync(dir + v).mtime.getTime()
+    }
+  }).sort(function (a, b) {
+    return b.time - a.time
+  }).map(function (v) {
+    return v.name
+  })
+
+  if (files.length > 0) {
+    return files[0]
+  } else {
+    console.log('Keine RPT Logs vorhanden')
+    ipcRenderer.send('to-app', {
+      'type': 'rpt_upload_callback',
+      'success': false,
+      'url': ''
+    })
+  }
+}
+
+const getArmaAppData = () => {
+  return pathf.join(app.getPath('appData'), '..', 'Local', 'Arma 3', '\\')
+}
+
+const uploadRPT = (rptfile, playerid) => {
+  let formData = {
+    file: fs.createReadStream(rptfile)
+  }
+  if (playerid) {
+    formData.pid = playerid
+  }
+  request.post({
+    url: 'https://api.realliferpg.de/v1/rpt_upload',
+    formData: formData
+  }, function optionalCallback (err, httpResponse, body) {
+    if (err) {
+      ipcRenderer.send('to-app', {
+        'type': 'rpt_upload_callback',
+        'success': false,
+        'url': ''
+      })
+      return console.error('upload failed:', err)
+    }
+    body = JSON.parse(body)
+    if (body.status === 200) {
+      ipcRenderer.send('to-app', {
+        'type': 'rpt_upload_callback',
+        'success': true,
+        'url': body.data.link
+      })
+    }
   })
 }

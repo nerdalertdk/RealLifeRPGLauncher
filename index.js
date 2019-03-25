@@ -11,12 +11,21 @@ const App = angular.module('App', ['720kb.tooltips']).run(($rootScope) => {
   $rootScope.logged_in = false
   $rootScope.logging_in = false
   $rootScope.map = null
+  $rootScope.uploadingRPT = false
+  $rootScope.reloadClass = 'glyphicon glyphicon-refresh'
+  $rootScope.reloadDisabled = false
 
   if (typeof process.env.PORTABLE_EXECUTABLE_DIR !== 'undefined') {
     $rootScope.portable = true
+    $rootScope.store = false
     $rootScope.AppTitle = 'RealLifeRPG Launcher - ' + app.getVersion() + ' Portable - Mods'
+  } else if (typeof process.windowsStore !== 'undefined') {
+    $rootScope.portable = false
+    $rootScope.store = true
+    $rootScope.AppTitle = 'RealLifeRPG Launcher - ' + app.getVersion() + ' Windows Store - Mods'
   } else {
     $rootScope.portable = false
+    $rootScope.store = false
     $rootScope.AppTitle = 'RealLifeRPG Launcher - ' + app.getVersion() + ' - Mods'
   }
 
@@ -31,6 +40,7 @@ const App = angular.module('App', ['720kb.tooltips']).run(($rootScope) => {
     }
   })
 
+  /*
   storage.get('agreement', (err, data) => {
     if (err) {
       ipcRenderer.send('open-agreement')
@@ -41,6 +51,7 @@ const App = angular.module('App', ['720kb.tooltips']).run(($rootScope) => {
       ipcRenderer.send('open-agreement')
     }
   })
+  */
 
   storage.get('player', (err, data) => {
     if (err) throw err
@@ -62,16 +73,25 @@ const App = angular.module('App', ['720kb.tooltips']).run(($rootScope) => {
     ipcRenderer.send('quitAndInstall')
   }
 
-  $rootScope.refresh = () => {
-    storage.get('settings', (err) => {
-      if (err) throw err
-      $rootScope.getMods()
-    })
-    helpers.getServers()
-    helpers.getChangelog()
-    helpers.getTwitch()
-    if ($rootScope.logged_in) {
-      helpers.getPlayerData($rootScope.apiKey)
+  $rootScope.refresh = (ui) => {
+    if (!$rootScope.reloadDisabled || !ui) {
+      storage.get('settings', (err) => {
+        if (err) throw err
+        $rootScope.getMods()
+      })
+      helpers.getServers()
+      helpers.getChangelog()
+      helpers.getTwitch()
+      if ($rootScope.logged_in) {
+        helpers.getPlayerData($rootScope.apiKey)
+      }
+      $rootScope.reloadClass = 'fa fa-spin fa-spinner'
+      $rootScope.reloadDisabled = true
+      setTimeout(() => {
+        $rootScope.reloadDisabled = false
+        $rootScope.reloadClass = 'glyphicon glyphicon-refresh'
+        $rootScope.$apply()
+      }, 3000)
     }
   }
 
@@ -137,7 +157,7 @@ const App = angular.module('App', ['720kb.tooltips']).run(($rootScope) => {
     if (typeof args.args !== 'undefined') {
       if (args.args.callback === 'player-callback') {
         $rootScope.player_data = args.data.data[0]
-        $rootScope.player_data.last_change = moment(new Date($rootScope.player_data.last_change)).format('H:mm, DD.MM.YYYY')
+        $rootScope.player_data.last_seen.date = moment(new Date($rootScope.player_data.last_seen.date)).format('H:mm, DD.MM.YYYY')
         $rootScope.player_data.cash_readable = $rootScope.player_data.cash.toString().replace(/(\d)(?=(\d\d\d)+(?!\d))/g, '$1.')
         $rootScope.player_data.bankacc_readable = $rootScope.player_data.bankacc.toString().replace(/(\d)(?=(\d\d\d)+(?!\d))/g, '$1.')
         $rootScope.player_data.exp_readable = $rootScope.player_data.exp.toString().replace(/(\d)(?=(\d\d\d)+(?!\d))/g, '$1.')
@@ -154,6 +174,32 @@ const App = angular.module('App', ['720kb.tooltips']).run(($rootScope) => {
           $rootScope.ArmaPath = data.armapath
           $rootScope.getMods()
         })
+        $rootScope.$apply()
+      }
+    }
+    if (args.type === 'rpt_upload_callback') {
+      if (args.success) {
+        alertify.set({
+          labels: {
+            ok: 'Link kopieren <span class="glyphicon glyphicon-copy"></span>',
+            cancel: 'Abbrechen'
+          }
+        })
+        alertify.confirm('Hochladen erfolgreich, sende den Link dem Dev/Admin/Support', (e) => {
+          if (e) {
+            helpers.copyToClipboard(args.url)
+            alertify.log('Kopiert', 'success')
+            $rootScope.uploadingRPT = false
+            $rootScope.$apply()
+          } else {
+            alertify.log('Abgebrochen', 'danger')
+            $rootScope.uploadingRPT = false
+            $rootScope.$apply()
+          }
+        })
+      } else {
+        alertify.log('Fehler', 'danger')
+        $rootScope.uploadingRPT = false
         $rootScope.$apply()
       }
     }
@@ -207,7 +253,7 @@ const App = angular.module('App', ['720kb.tooltips']).run(($rootScope) => {
 
     $rootScope.tour.addStep('mods', {
       title: 'Mods',
-      text: 'Hier kannst du unsere Mods downloaden und prüfen sowie das Spiel starten.',
+      text: 'Hier kannst du unsere Mods downloaden und prüfen, sowie das Spiel starten.',
       attachTo: '.modsTabBtn bottom',
       buttons: {
         text: 'Weiter',
@@ -239,7 +285,7 @@ const App = angular.module('App', ['720kb.tooltips']).run(($rootScope) => {
 
     $rootScope.tour.addStep('player', {
       title: 'Spieler',
-      text: 'Nachdem du dich eingeloggt hast findest du hier deine Spielerdaten.',
+      text: 'Nachdem du dich eingeloggt hast, findest du hier deine Spielerdaten.',
       attachTo: '.playerTabBtn bottom',
       buttons: {
         text: 'Weiter',
@@ -271,7 +317,7 @@ const App = angular.module('App', ['720kb.tooltips']).run(($rootScope) => {
 
     $rootScope.tour.addStep('tfar', {
       title: 'Task Force Radio',
-      text: 'Hier kannst du das Task Force Radio Plugin für deinen Teamspeak 3 Client installieren, sowie einen Skin der im ReallifeRPG Stil gehalten ist.',
+      text: 'Hier kannst du das Task Force Radio Plugin für deinen Teamspeak 3 Client installieren, sowie einen Skin, der im ReallifeRPG Stil gehalten ist.',
       attachTo: '.tfarTabBtn bottom',
       buttons: {
         text: 'Weiter',
@@ -303,7 +349,7 @@ const App = angular.module('App', ['720kb.tooltips']).run(($rootScope) => {
 
     $rootScope.tour.addStep('faq', {
       title: 'FAQ',
-      text: 'Hier werden viele oft gestellte Fragen direkt beantwortet. Schau kurz mal hier nach bevor du dich im Support meldest, vielleicht wird deine Frage ja direkt beantwortet.',
+      text: 'Hier werden viele oft gestellte Fragen direkt beantwortet. Schau kurz mal hier nach, bevor du dich im Support meldest - vielleicht wird deine Frage ja direkt beantwortet.',
       attachTo: '.faqTabBtn bottom',
       buttons: {
         text: 'Weiter',
@@ -319,7 +365,7 @@ const App = angular.module('App', ['720kb.tooltips']).run(($rootScope) => {
 
     $rootScope.tour.addStep('Twitch', {
       title: 'Über',
-      text: 'Hier findest du immer Streamer die gerade auf unserem Server spielen.',
+      text: 'Hier findest du immer Streamer, die gerade auf unserem Server spielen.',
       attachTo: '.twitchTabBtn bottom',
       buttons: {
         text: 'Weiter',
@@ -335,7 +381,7 @@ const App = angular.module('App', ['720kb.tooltips']).run(($rootScope) => {
 
     $rootScope.tour.addStep('map', {
       title: 'Karte',
-      text: 'Hier findest du eine Karte von Abramia auf der du dir den Füllstand aller Tankstellen anzeigen lassen kannst.',
+      text: 'Hier findest du eine Karte von Havenborn auf der du dir den Füllstand aller Tankstellen anzeigen lassen kannst.',
       attachTo: '.mapTabBtn bottom',
       buttons: {
         text: 'Weiter',
@@ -367,7 +413,7 @@ const App = angular.module('App', ['720kb.tooltips']).run(($rootScope) => {
 
     $rootScope.tour.addStep('end', {
       title: 'Viel Spaß!',
-      text: 'Genug gelesen, lad dir unseren Mod runter, installier Task Force Radio, betritt den Server und entdecke deine ganz eigene Weise auf ReallifeRPG zu spielen. Viel Spaß von unserem ganzen Team!',
+      text: 'Genug gelesen, lad dir unseren Mod runter, installier Task Force Radio, betritt den Server und entdecke deine ganz eigene Weise, auf ReallifeRPG zu spielen. Viel Spaß von unserem ganzen Team!',
       buttons: {
         text: 'Beenden',
         action: $rootScope.endTour
@@ -411,3 +457,6 @@ App.directive('onFinishRender', ($timeout) => {
     }
   }
 })
+
+document.addEventListener('dragover', event => event.preventDefault())
+document.addEventListener('drop', event => event.preventDefault())
